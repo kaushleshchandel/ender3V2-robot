@@ -2,6 +2,9 @@
  * Marlin 3D Printer Firmware
  * Copyright (c) 2020 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]
  *
+ * Based on Sprinter and grbl.
+ * Copyright (c) 2011 Camiel Gubbels / Erik van der Zalm
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -27,7 +30,12 @@
  */
 
 #include "BL24CXX.h"
-#include <libmaple/gpio.h>
+#ifdef __STM32F1__
+  #include <libmaple/gpio.h>
+#else
+  #include "../HAL/shared/Delay.h"
+  #define delay_us(n) DELAY_US(n)
+#endif
 
 #ifndef EEPROM_WRITE_DELAY
   #define EEPROM_WRITE_DELAY    10
@@ -37,15 +45,20 @@
 #endif
 
 // IO direction setting
-#define SDA_IN()  do{ PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH &= 0XFFFF0FFF; PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH |= 8 << 12; }while(0)
-#define SDA_OUT() do{ PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH &= 0XFFFF0FFF; PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH |= 3 << 12; }while(0)
+#ifdef __STM32F1__
+  #define SDA_IN()  do{ PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH &= 0XFFFF0FFF; PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH |= 8 << 12; }while(0)
+  #define SDA_OUT() do{ PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH &= 0XFFFF0FFF; PIN_MAP[IIC_EEPROM_SDA].gpio_device->regs->CRH |= 3 << 12; }while(0)
+#elif defined(STM32F1) || defined(STM32F4) || defined(ARDUINO_ARCH_HC32)
+  #define SDA_IN()  SET_INPUT(IIC_EEPROM_SDA)
+  #define SDA_OUT() SET_OUTPUT(IIC_EEPROM_SDA)
+#endif
 
 // IO ops
-#define IIC_SCL_0()   WRITE(IIC_EEPROM_SCL, LOW)
-#define IIC_SCL_1()   WRITE(IIC_EEPROM_SCL, HIGH)
-#define IIC_SDA_0()   WRITE(IIC_EEPROM_SDA, LOW)
-#define IIC_SDA_1()   WRITE(IIC_EEPROM_SDA, HIGH)
-#define READ_SDA()    READ(IIC_EEPROM_SDA)
+#define IIC_SCL_0() WRITE(IIC_EEPROM_SCL, LOW)
+#define IIC_SCL_1() WRITE(IIC_EEPROM_SCL, HIGH)
+#define IIC_SDA_0() WRITE(IIC_EEPROM_SDA, LOW)
+#define IIC_SDA_1() WRITE(IIC_EEPROM_SDA, HIGH)
+#define READ_SDA()  READ(IIC_EEPROM_SDA)
 
 //
 // Simple IIC interface via libmaple
@@ -128,7 +141,7 @@ void IIC::nAck() {
 void IIC::send_byte(uint8_t txd) {
   SDA_OUT();
   IIC_SCL_0(); // Pull down the clock to start data transmission
-  LOOP_L_N(t, 8) {
+  for (uint8_t t = 0; t < 8; ++t) {
     // IIC_SDA = (txd & 0x80) >> 7;
     if (txd & 0x80) IIC_SDA_1(); else IIC_SDA_0();
     txd <<= 1;
@@ -144,7 +157,7 @@ void IIC::send_byte(uint8_t txd) {
 uint8_t IIC::read_byte(unsigned char ack_chr) {
   unsigned char receive = 0;
   SDA_IN(); // SDA is set as input
-  LOOP_L_N(i, 8) {
+  for (uint8_t i = 0; i < 8; ++i) {
     IIC_SCL_0();
     delay_us(2);
     IIC_SCL_1();
@@ -190,8 +203,7 @@ uint8_t BL24CXX::readOneByte(uint16_t ReadAddr) {
 // Write a data at the address specified by BL24CXX
 // WriteAddr: The destination address for writing data
 // DataToWrite: the data to be written
-void BL24CXX::writeOneByte(uint16_t WriteAddr, uint8_t DataToWrite) 
-{
+void BL24CXX::writeOneByte(uint16_t WriteAddr, uint8_t DataToWrite) {
   IIC::start();
   if (EE_TYPE > BL24C16) {
     IIC::send_byte(EEPROM_DEVICE_ADDRESS);        // Send write command
@@ -201,13 +213,13 @@ void BL24CXX::writeOneByte(uint16_t WriteAddr, uint8_t DataToWrite)
   else
     IIC::send_byte(EEPROM_DEVICE_ADDRESS + ((WriteAddr >> 8) << 1)); // Send device address 0xA0, write data
 
-    IIC::wait_ack();
-    IIC::send_byte(WriteAddr & 0xFF);               // Send low address
-    IIC::wait_ack();
-    IIC::send_byte(DataToWrite);                    // Receiving mode
-    IIC::wait_ack();
-    IIC::stop();                                    // Generate a stop condition
-    delay(5);
+  IIC::wait_ack();
+  IIC::send_byte(WriteAddr & 0xFF);               // Send low address
+  IIC::wait_ack();
+  IIC::send_byte(DataToWrite);                    // Receiving mode
+  IIC::wait_ack();
+  IIC::stop();                                    // Generate a stop condition
+  delay(10);
 }
 
 // Start writing data of length Len at the specified address in BL24CXX
@@ -216,7 +228,7 @@ void BL24CXX::writeOneByte(uint16_t WriteAddr, uint8_t DataToWrite)
 // DataToWrite: the first address of the data array
 // Len: The length of the data to be written 2, 4
 void BL24CXX::writeLenByte(uint16_t WriteAddr, uint32_t DataToWrite, uint8_t Len) {
-  LOOP_L_N(t, Len)
+  for (uint8_t t = 0; t < Len; ++t)
     writeOneByte(WriteAddr + t, (DataToWrite >> (8 * t)) & 0xFF);
 }
 
@@ -227,7 +239,7 @@ void BL24CXX::writeLenByte(uint16_t WriteAddr, uint32_t DataToWrite, uint8_t Len
 // Len: The length of the data to be read 2,4
 uint32_t BL24CXX::readLenByte(uint16_t ReadAddr, uint8_t Len) {
   uint32_t temp = 0;
-  LOOP_L_N(t, Len) {
+  for (uint8_t t = 0; t < Len; ++t) {
     temp <<= 8;
     temp += readOneByte(ReadAddr + Len - t - 1);
   }
@@ -245,8 +257,7 @@ bool BL24CXX::_check() {
 }
 
 bool BL24CXX::check() {
-  if (_check())
-  {                                           // Value was written? Good EEPROM!
+  if (_check()) {                                           // Value was written? Good EEPROM!
     writeOneByte(BL24CXX_TEST_ADDRESS, BL24CXX_TEST_VALUE); // Write now and check.
     return _check();
   }
@@ -266,17 +277,9 @@ void BL24CXX::read(uint16_t ReadAddr, uint8_t *pBuffer, uint16_t NumToRead) {
 // WriteAddr: the address to start writing, 0~255 for 24c02
 // pBuffer: the first address of the data array
 // NumToWrite: the number of data to be written
-void BL24CXX::write(uint16_t WriteAddr, uint8_t *pBuffer, uint16_t NumToWrite) 
-{
+void BL24CXX::write(uint16_t WriteAddr, uint8_t *pBuffer, uint16_t NumToWrite) {
   for (; NumToWrite; NumToWrite--, WriteAddr++)
-  {
     writeOneByte(WriteAddr, *pBuffer++);
-  }    
 }
 
-void BL24CXX::EEPROM_Reset(uint16_t WriteAddr, uint8_t *pBuffer, uint16_t NumToWrite)
-{
-	write(WriteAddr, 0, NumToWrite);
-  delay(200);
-}
 #endif // IIC_BL24CXX_EEPROM

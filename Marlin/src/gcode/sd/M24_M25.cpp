@@ -21,8 +21,8 @@
  */
 
 #include "../../inc/MarlinConfig.h"
-#include "../../lcd/dwin/e3v2/dwin.h"
-#if ENABLED(SDSUPPORT)
+
+#if HAS_MEDIA
 
 #include "../gcode.h"
 #include "../../sd/cardreader.h"
@@ -41,7 +41,7 @@
   #include "../../feature/powerloss.h"
 #endif
 
-#if ENABLED(DGUS_LCD_UI_MKS)
+#if DGUS_LCD_UI_MKS
   #include "../../lcd/extui/dgus/DGUSDisplayDef.h"
 #endif
 
@@ -52,7 +52,7 @@
  */
 void GcodeSuite::M24() {
 
-  #if ENABLED(DGUS_LCD_UI_MKS)
+  #if DGUS_LCD_UI_MKS
     if ((print_job_timer.isPaused() || print_job_timer.isRunning()) && !parser.seen("ST"))
       MKS_resume_print_move();
   #endif
@@ -70,28 +70,19 @@ void GcodeSuite::M24() {
   #endif
 
   if (card.isFileOpen()) {
-    card.startOrResumeFilePrinting();            // SD card will now be read for commands
+    card.startOrResumeFilePrinting(); // SD card will now be read for commands
     startOrResumeJob();               // Start (or resume) the print job timer
     TERN_(POWER_LOSS_RECOVERY, recovery.prepare());
   }
 
   #if ENABLED(HOST_ACTION_COMMANDS)
     #ifdef ACTION_ON_RESUME
-      host_action_resume();
+      hostui.resume();
     #endif
-    TERN_(HOST_PROMPT_SUPPORT, host_prompt_open(PROMPT_INFO, PSTR("Resuming SD"), DISMISS_STR));
+    TERN_(HOST_PROMPT_SUPPORT, hostui.prompt_open(PROMPT_INFO, F("Resuming SD"), FPSTR(DISMISS_STR)));
   #endif
 
   ui.reset_status();
-//rock_20211021 //不是SD卡打印情况下，进入了M24就进入打印页面
-  #if ENABLED(DWIN_CREALITY_LCD)
-    if(recovery.info.sd_printing_flag == false) 
-    {
-      // Update_Time_Value = 0;
-      print_job_timer.start();
-      Goto_PrintProcess();      //进入打印页面。
-    }
-  #endif
 }
 
 /**
@@ -102,14 +93,6 @@ void GcodeSuite::M24() {
  *   position. M24 will move the head back before resuming the print.
  */
 void GcodeSuite::M25() {
-  //判断是否联机打印
-  if(!HMI_flag.remove_card_flag&&!HMI_flag.pause_action&&!HMI_flag.cutting_line_flag)
-  {
-    HMI_flag.online_pause_flag=true;
-    //HMI_flag.pause_action=true;
-    ICON_Continue();
-  }
-  
 
   #if ENABLED(PARK_HEAD_ON_PAUSE)
 
@@ -118,34 +101,26 @@ void GcodeSuite::M25() {
   #else
 
     // Set initial pause flag to prevent more commands from landing in the queue while we try to pause
-    #if ENABLED(SDSUPPORT)
-      if (IS_SD_PRINTING()) card.pauseSDPrint();
-    #endif
+    if (IS_SD_PRINTING()) card.pauseSDPrint();
 
     #if ENABLED(POWER_LOSS_RECOVERY) && DISABLED(DGUS_LCD_UI_MKS)
-      if (recovery.enabled) 
-      {
-
-      }
+      if (recovery.enabled) recovery.save(true);
     #endif
 
     print_job_timer.pause();
 
     TERN_(DGUS_LCD_UI_MKS, MKS_pause_print_move());
-    
-  TERN_(DWIN_CREALITY_LCD, ui.reset_status());
-    //IF_DISABLED(DWIN_CREALITY_LCD, ui.reset_status());
-    //TERN(DWIN_CREALITY_LCD,,ui.reset_status());
+
+    IF_DISABLED(DWIN_CREALITY_LCD, ui.reset_status());
 
     #if ENABLED(HOST_ACTION_COMMANDS)
-      TERN_(HOST_PROMPT_SUPPORT, host_prompt_open(PROMPT_PAUSE_RESUME, PSTR("Pause SD"), PSTR("Resume")));
+      TERN_(HOST_PROMPT_SUPPORT, hostui.prompt_open(PROMPT_PAUSE_RESUME, F("Pause SD"), F("Resume")));
       #ifdef ACTION_ON_PAUSE
-        host_action_pause();
+        hostui.pause();
       #endif
     #endif
 
   #endif
-
 }
 
-#endif // SDSUPPORT
+#endif // HAS_MEDIA

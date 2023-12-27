@@ -47,7 +47,7 @@ void GcodeSuite::M32() {
 
     card.openFileRead(parser.string_arg, call_procedure);
 
-    if (parser.seenval('S')) card.setIndex((parser.value_long()));  //rock_20210818
+    if (parser.seenval('S')) card.setIndex(parser.value_long());
 
     card.startOrResumeFilePrinting();
 
